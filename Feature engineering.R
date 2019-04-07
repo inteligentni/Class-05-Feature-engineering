@@ -1,0 +1,458 @@
+# 
+# Feature engineering
+# Vladan Devedzic, Apr 07, 2019
+# 
+
+
+# (Installing and) Loading the required R packages:
+# install.packages("ggplot2")
+library(ggplot2)
+
+
+###########
+# Dataset #
+###########
+
+# Read the dataset
+# An engineered and highly simplified version:
+the.beatles.songs <- read.csv("The Beatles songs dataset, v1, no NAs.csv", 
+                              stringsAsFactors = FALSE)
+summary(the.beatles.songs)
+# A more realistic, but still very simple version:
+the.beatles.songs <- read.csv("The Beatles songs dataset, v3.csv", 
+                              stringsAsFactors = FALSE)
+summary(the.beatles.songs)
+
+
+##################
+# Missing values #
+##################
+
+# NAs are missing values; empty strings ("") are not the same as NAs.
+
+# Different ways of checking if there are NAs and/or ""s:
+# summary(<dataframe>)
+# which(complete.cases(<dataframe>) == FALSE)           # which rows contain NAs
+# length(which(complete.cases(<dataframe>) == FALSE))   # how many such rows
+# which(is.na(<dataframe>[<row>, ]))                    # NAs in <row>
+# which(is.na(<dataframe>$<column>))                    # NAs in <column>
+# which(<dataframe>$<column> == "")                     # ""s in <column>
+# nrow(<dataframe>[<dataframe>$<column> == "", ])       # how many such rows
+summary(the.beatles.songs)
+which(complete.cases(the.beatles.songs) == FALSE)
+which(is.na(the.beatles.songs$Top.50.Billboard))
+which(the.beatles.songs$Single.A.side == "")
+nrow(the.beatles.songs[(the.beatles.songs$Single.A.side == "") & (the.beatles.songs$Year == 1967), ])
+
+# Visualizing NAs:
+# library(Amelia)                       # visualizes NAs, BUT NOT ""s !!!
+#                                       # to visualize ""s with Amelia as well, replace ""s with NAs
+# par(mfrow=c(1,2))                     # structure the display area to show two plots in the same row 
+# missmap(obj = <dataframe>, 
+#         main = "<title>", 
+#         legend = FALSE)
+# par(mfrow=c(1,1))                     # revert the plotting area to the default (one plot per row)
+## Amelia is not absolutely necessary for small-scale problems, 
+## since summary(dataframe) clearly shows NAs as well 
+## (and so do which(complete.cases(<dataframe>) == FALSE)) and which(is.na(<dataframe>$<column>))).
+library(Amelia)
+par(mfrow=c(1,2))
+missmap(obj = the.beatles.songs, main = "The Beatles songs dataset NAs (1/2)", legend = FALSE)
+missmap(obj = the.beatles.songs[, c(-3:-15)], main = "The Beatles songs dataset NAs (2/2)", legend = FALSE)
+par(mfrow=c(1,1))
+
+### Handling NAs
+
+# Categorical variables with a small number of missing values
+# In a situation like this, the missing values are replaced by the 'majority class' (the dominant value).
+# unique(<dataframe>$<column>)                  # how many different values
+# xtabs(~<column>, data = <dataframe>)          # show frequencies, but not for NAs
+# table(<dataframe>$<column>)                   # show frequencies, but not for NAs
+# table(<dataframe>$<column>, useNA = "ifany")  # show frequencies for NAs as well
+unique(the.beatles.songs$Year)                                      # how many different values of Year
+which(the.beatles.songs$Year == "196?")                             # turn this one into NA
+the.beatles.songs$Year[69] <- NA
+the.beatles.songs$Year <- as.factor(the.beatles.songs$Year)         # represent Year as a factor
+table(the.beatles.songs$Year, useNA = "ifany")                      # show frequencies, including NA
+max(as.integer(table(the.beatles.songs$Year)))                      # find the 'majority class'
+the.beatles.songs$Year[69] <- "1963"                                # replace the NA
+xtabs(~Year, the.beatles.songs)                                     # verify the replacement
+saveRDS(the.beatles.songs, "The Beatles songs dataset, v5.1.RData") # save this version for later use
+# the.beatles.songs <- readRDS("The Beatles songs dataset, v5.1.RData")
+
+# Numeric variables with a small number of missing values (Alternative 1)
+### Replace the missing values with the average value of the variable on a subset of instances 
+### that are the closest (the most similar) to the instance(s) with the missing value. 
+### If the variable is normaly distributed (shapiro.test()) -> use the mean; otherwise, used the median.
+### In the simplest case, use the entire range of instances.
+# summary(<dataframe>$<numeric column>)                       # inspect normality
+# plot(density((<dataframe>$<numeric column>), na.rm = TRUE)  # inspect normality
+# shapiro.test(<dataframe>$<numeric column>)                  # inspect normality
+# <indices> <- which(is.na(<dataframe>$<numeric column>))     # get the indices of NAs in <dataframe>$<numeric column>
+# <dataframe>$<numeric column>[<indices>] <-                  # in case of normal distribution
+#   mean(<dataframe>$<numeric column>, na.rm = TRUE)
+# <dataframe>$<numeric column>[<indices>] <-                  # in other cases
+#   median(<dataframe>$<numeric column>, na.rm = TRUE)
+summary(the.beatles.songs$Duration)
+plot(density(the.beatles.songs$Duration, na.rm = TRUE))
+shapiro.test(the.beatles.songs$Duration)
+original.Duration <- the.beatles.songs$Duration               # save it for the other examples
+indices <- which(is.na(the.beatles.songs$Duration))
+the.beatles.songs$Duration[indices] <-                        # distribution is not normal, 
+  as.integer(summary(the.beatles.songs$Duration)[3])          # so use the median
+
+# Numeric variables with a small number of missing values (Alternative 2)
+### Use linear regression to PREDICT the missing values, 
+### and replace the missing values with the predicted ones
+# <indices of missing values> <- 
+#   which(is.na(<dataframe>$<numeric column>))
+# length(<indices of missing values>)                     # verify that the number is small
+# install.packages("rpart")
+# library(rpart)
+# <regression tree> <- 
+#   rpart(<output variable> ~                             # build the regression tree (the model)
+#           <predictor variable 1> + 
+#           <predictor variable 2> + ...,                 # . to include all variables
+#         data =                                          # the entire dataframe, but 
+#           <dataframe>[-<indices of missing values>],    # leaving out the rows with NAs
+#         method = "anova")                               # build regression tree
+# install.packages('rattle')
+# install.packages('rpart.plot')
+# install.packages('RColorBrewer')
+# library(rattle)
+# library(rpart.plot)
+# library(RColorBrewer)
+# fancyRpartPlot(<regression tree>)                       # plot the regression tree
+# <predicted values for NAs> <-                           # make predictions
+#   predict(object = <regression tree>, 
+#           newdata = <dataframe>[<indices of missing values>, ])
+# <original <dataframe>$<numeric column> as a dataframe> <-             # save it for later assessment
+#   data.frame(<numeric column name> = <dataframe>$<numeric column>)
+# <original <dataframe>$<numeric column> as a dataframe>$lbl <- "before"
+# ggplot(<original <dataframe>$<numeric column> as a dataframe>,        # optional: plot the density of 
+#        aes(x = <numeric column>)) +                                   # the original <numeric column>
+#   geom_density()
+# <dataframe>$<numeric column>[<indices of missing values>] <-          # impute predicted values
+#   as.integer(<predicted values for NAs>)
+# summary(<dataframe>$<numeric column>)                                 # verify that NAs are eliminated
+# summary(<original <dataframe>$<numeric column> as a dataframe>$<numeric column>)
+# <modified <dataframe>$<numeric column> as a dataframe> <- 
+#   data.frame(<numeric column name> = <dataframe>$<numeric column>)
+# <modified <dataframe>$<numeric column> as a dataframe>$lbl <- "after"
+# <before-and-after dataframe> <-                                       # append 2 new dataframes: 
+#   rbind(<original <dataframe>$<numeric column> as a dataframe>,       # before and
+#         <modified <dataframe>$<numeric column> as a dataframe>)       # after the imputation
+# library(ggplot2)
+# ggplot(<before-and-after dataframe>,                      # plot the results
+#        aes(x = <numeric column name>, fill = lbl)) + 
+#   geom_density(alpha = 0.2) +                             # alpha: plot transparency (0-1, optional)
+#   theme_bw()
+
+the.beatles.songs$Duration <- original.Duration           # restore the original Duration (with NAs)
+indices <- which(is.na(the.beatles.songs$Duration))
+library(rpart)
+song.duration.model <- rpart(Duration ~ Year, 
+                             data = the.beatles.songs,
+                             method = "anova")
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+fancyRpartPlot(song.duration.model)                       # plot the regression tree
+song.duration.predicted <- 
+  predict(object = song.duration.model, 
+          newdata = the.beatles.songs[indices, ])
+original.Duration.df <- data.frame(Duration = the.beatles.songs$Duration)
+original.Duration.df$lbl <- "before"
+# ggplot(original.Duration.df, aes(x = Duration)) + geom_density()
+the.beatles.songs$Duration[indices] <- song.duration.predicted
+summary(the.beatles.songs$Duration)
+summary(original.Duration.df$Duration)
+modified.Duration.df <- data.frame(Duration = the.beatles.songs$Duration)
+modified.Duration.df$lbl <- "after"
+duration.df <- rbind(original.Duration.df, modified.Duration.df)
+library(ggplot2)
+ggplot(duration.df, aes(x = Duration, fill = lbl)) + 
+ geom_density(alpha = 0.3) + 
+ theme_bw()
+
+# Numeric variables with a small number of missing values (Alternative 3)
+### Use non-NA values from a subset of SIMILAR observations 
+### (similar in terms of having (nearly) the same values of other relevant features). 
+### Suitable when the number of NAs is very small, since the replacements typically go one by one.
+### The example in Introduction to Data Science with R - Exploratory Modeling 2, 
+### from 1:24:38 to 1:28:04, l. 805-815, where one is looking at similar records in the dataset, 
+### in order to find a suitable replacement for the missing value.
+### This approach has not been demonstrated here because no suitable feature is available in the dataset 
+### (a numeric feature with a very small number of NAs), but the approach is worth mentioning.
+
+# Variables with many missing values and/or missing values that are difficult to replace
+### A more sophisticated imputation is applied in such cases (out of scope of this course).  
+### It is, in fact, the task of predicting (good substitutes for) the missing values. 
+### The other option is to create some new variables ("proxies") and do some feature engineering.
+
+# Get rid of all other NAs and factorize suitable features 
+# before attempting feature selection and engineering:
+source("Get rid of NAs.R")
+the.beatles.songs <- getRidOfNAs(the.beatles.songs)
+saveRDS(the.beatles.songs, "The Beatles songs dataset, v5.2.RData")
+the.beatles.songs <- factorize(the.beatles.songs)
+saveRDS(the.beatles.songs, "The Beatles songs dataset, v5.3.RData")
+
+### Feature selection and engineering
+
+###### Overall philosophy: pick features one by one, or in suitable pairs, and see how they can 
+###### be engineered to increase the quality/precision of predictions.
+###### Generally, plot variables and their values (with na.rm = TRUE) whenever it makes sense. 
+###### It gives you a better sense of the predictive power of each variable.
+
+# Split the dataset into train and test sets:
+# install.packages("caret")
+# library(caret)
+# set.seed(<n>)
+# <train dataset indices> <-                            # stratified partitioning: 
+#     createDataPartition(<dataset>$<output variable>,  # the same distribution of the output variable in both sets
+#                         p = .80,                      # 80/20% of data in train/test sets
+#                         list = FALSE)                 # don't make a list of results, make a matrix
+# <train dataset> <- <dataset>[<train dataset indices>, ]
+# <test dataset>  <- <dataset>[-<train dataset indices>, ]
+library(caret)
+set.seed(444)
+# set.seed(333) - results in a different split, and different tree and eval. metrics
+train.data.indices <- createDataPartition(the.beatles.songs$Top.50.Billboard, p = 0.80, list = FALSE)
+train.data <- the.beatles.songs[train.data.indices, ]
+test.data <- the.beatles.songs[-train.data.indices, ]
+
+# Examining the predictive power of variables from the data set 
+# by means of tables, frequencies and proportions
+# For a categorical predictor, check its frequencies and proportions in the dataset:
+# summary(<dataset>$<predictor>)                                          # frequencies
+# round(summary(<dataset>$<predictor>) / nrow(<dataset>), digits = 3)     # proportions
+summary(train.data$Single.certification)
+round(summary(train.data$Single.certification) / nrow(train.data), digits = 3)
+
+# Then examine the frequencies and the proportions of the output variable values (classes) 
+# based on the predictor values:
+# xtabs(~<predictor> + <output variable>, data = <dataset>)               # frequencies
+# prop.table(xtabs(~<predictor> + <output variable>, data = <dataset>),   # proportions
+#                  margin = 1)                                            # by row
+xtabs(~Single.certification + Top.50.Billboard, data = train.data)
+prop.table(xtabs(~Single.certification + Top.50.Billboard, data = train.data), margin = 1)
+
+# For a numeric predictor with a small number of values, first convert it into a factor:
+# <dataset>$<predictor> <- factor(<dataset>$<predictor>, 
+#                                 levels = c(<n1>, <n2>, ...), 
+#                                 labels = c("<l1>", "<l2>", ...))
+# However, make sure to keep the original (numeric) values from the integrated dataset 
+# (including both and test datasets) for possible later use:
+# <original numeric predictor> <- <integrated dataset>$<predictor>
+unique(train.data$Weeks.at.No1.in.UK.The.Guardian)
+original.Weeks.at.No1.in.UK.The.Guardian <-                               # keep it for later
+  the.beatles.songs$Weeks.at.No1.in.UK.The.Guardian
+train.data$Weeks.at.No1.in.UK.The.Guardian <- 
+  factor(train.data$Weeks.at.No1.in.UK.The.Guardian, 
+         levels = c(0, 2, 3, 4, 5, 6, 7), 
+         labels = c("0", "2", "3", "4", "5", "6", "7"))
+
+# Then examine frequencies and proportions as above, or plot the output variable against the predictor:
+# <gg> <- ggplot(<dataset>, aes(x = <predictor name>, fill = <output variable name>)) +
+#   geom_bar(position = "dodge", width = <bin width>) +       # "dodge": bargraph, <bin width>: 0.2-0.4
+#   labs(x = "<x-label>", y = "<y-label>", title = "<title>") +
+#   theme_bw()
+# <gg>
+# <gf> <- <gg> + facet_wrap(~<another predictor name>)        # examine 2 predictors together
+# <gf>
+gg1 <- ggplot(data = train.data, aes(x = Weeks.at.No1.in.UK.The.Guardian, fill = Top.50.Billboard)) +
+  geom_bar(position = "dodge", width = 0.6) +
+  ylab("Number of Billboard Top 50 songs") + xlab("Weeks and No.1 in UK (The Guardian)") +
+  theme_bw()
+gg1
+gg2 <- ggplot(data = train.data, aes(x = Year, fill = Top.50.Billboard)) +
+  geom_bar(position = "dodge", width = 0.6) +
+  ylab("Number of Billboard Top 50 songs") + xlab("Year") +
+  theme_bw()
+gg2
+gg3 <- ggplot(data = train.data, aes(x = Single.certification, fill = Top.50.Billboard)) +
+  geom_bar(position = "dodge", width = 0.6) +
+  labs(y = "Number of Billboard Top 50 songs", x = "Single certification", title = "Certified") +
+  theme_bw()
+gg3
+gg4 <- gg3 + facet_wrap(~Year)
+gg4
+
+### Feature engineering
+
+#### When creating new features (attributes) to be used for prediction purposes, 
+#### we should merge the training and the test sets and develop new features on the merged data.
+#### Before that, we need to assure that the training and the test sets have exactly the same structure.
+
+# In the test set, do all the modifications that have been done in the train set:
+unique(test.data$Weeks.at.No1.in.UK.The.Guardian)
+test.data$Weeks.at.No1.in.UK.The.Guardian <- 
+  factor(test.data$Weeks.at.No1.in.UK.The.Guardian, 
+         levels = c(0, 2, 3, 4, 5, 6, 7), 
+         labels = c("0", "2", "3", "4", "5", "6", "7"))
+
+# Merge the train and test datasets into one for creating new features:
+# <adapted dataset> <- rbind(<adapted train dataset>, <adapted test dataset>)
+# saveRDS(<adapted dataset>, "<RData filename>")
+the.beatles.songs <- rbind(train.data, test.data)
+saveRDS(the.beatles.songs, "The Beatles songs dataset, v5.4.RData")
+
+# Creating a proxy variable for a certain feature
+### It's a new variable that approximates an original one, 
+### or is a good replacement for the original one.
+
+# How many Top 50 Billboard songs performed by the Beatles are covers of other authors' songs?
+which(the.beatles.songs$Cover == "Yes")                                  # how many cover songs (all)
+top.50.bb.indices <- which(the.beatles.songs$Top.50.Billboard == "Yes")  # all Billboard Top 50 songs
+top.50.bb.indices
+which(the.beatles.songs$Cover[top.50.bb.indices] == "Yes")  # how many cover songs on Billboard Top 50
+
+# Very few Top 50 Billboard songs performed by the Beatles are covers of other authors' songs, 
+# so take a closer look at the Songwriter feature.
+# How many different Songwriter values are there?
+unique(the.beatles.songs$Songwriter)
+# How many songs are covers?
+length(which(the.beatles.songs$Cover == "Yes"))
+
+# It's a considerable difference (82 vs. 71), so it's better to create a proxy for song authorship.
+# How many songs have, say, John Lennon in the list of authors?
+# grepl(<substring>, <string>)              # TRUE if <string> contains <substring>
+# <indices> <-                              # indices of <character variable> containing <substring>
+#   grep(<substring>,
+#        <dataframe>$<character variable>)
+grepl("eat", "The Beatles")
+i.lennon <- grep("Lennon", the.beatles.songs$Songwriter)
+i.mccartney <- grep("McCartney", the.beatles.songs$Songwriter)
+i.harrison <- grep("Harrison", the.beatles.songs$Songwriter)
+i.starkey <- grep("Starkey", the.beatles.songs$Songwriter)
+
+source("Song author proxies.R")
+authors <- getSongAuthorProxies(i.lennon, i.mccartney, i.harrison, i.starkey)
+lennon.songs <- authors[[1]]
+mccartney.songs <- authors[[2]]
+harrison.songs <- authors[[3]]
+starkey.songs <- authors[[4]]
+lennon.mccartney.songs <- authors[[5]]
+mccartney.lennon.songs <- authors[[6]]
+lennon.mccartney.harrison.starkey.songs <- authors[[7]]
+
+# Create a proxy variables for dufferent authors:
+the.beatles.songs$Author <- "Other"
+the.beatles.songs$Author[lennon.songs] <- "Lennon"
+the.beatles.songs$Author[mccartney.songs] <- "McCartney"
+the.beatles.songs$Author[harrison.songs] <- "Harrison"
+the.beatles.songs$Author[starkey.songs] <- "Starkey"
+the.beatles.songs$Author[lennon.mccartney.songs] <- "Lennon/McCartney"
+the.beatles.songs$Author[mccartney.lennon.songs] <- "McCartney/Lennon"
+the.beatles.songs$Author[lennon.mccartney.harrison.starkey.songs] <- "Lennon/McCartney/Harrison/Starkey"
+
+# Convert the new proxy vriable into a factor:
+the.beatles.songs$Author <- factor(the.beatles.songs$Author)
+summary(the.beatles.songs$Author)
+
+# Examine the predictive power of the newly created proxy variable:
+# ggplot(data = <dataset>[1:<training data length>, ],  # only the training data from the merged dataset!
+#        aes(x = <proxy variable name>, 
+#            fill = <output variable name>)) + 
+#   geom_bar(position = "dodge") +                      # bar graph
+#   theme_bw()
+ggplot(the.beatles.songs[1:249, ], 
+       aes(x = Author, fill = Top.50.Billboard)) +
+  geom_bar(position = "dodge") + 
+  theme_bw()
+
+# Creating a new variable / new variables
+# Ideas about Chart.position.UK.Wikipedia, Chart.position.US.Wikipedia, Highest.position.The.Guardian, 
+# Weeks.on.chart.in.UK.The.Guardian and Weeks.at.No1.The.Guardian:
+# Normalized chart position 
+#   if (<chart position> == 0) {
+#     <normalized chart position> <- 0
+#   }
+#   if (<chart position> in (1:<max value>)) {
+#     <normalized chart position> <- (<max value> - <chart position> + 1) / <max value>
+#   }
+# Normalized weeks-on-chart
+#   <normalized weeks-on-chart> <- <weeks-on-chart> / <max value>
+# Normalized weeks-at-No.1
+#   <normalized weeks-at-No.1> <- <weeks-at-No.1> / <max value>
+# Idea: chart presence
+# Chart presence in UK/US: 
+#   <chart presence> <- 
+#     (<a> * <normalized chart position> + 
+#      <b> * <normalized weeks-on-chart> + 
+#      <c> * normalized weeks-at-no-1) / 
+#     (<a> + <b> + <c>)
+# Chart presence in both UK and US (overall): ((a * ch.pr.1 + b * ch.pr.2) / (a + b))
+#   <chart presence> <- 
+#     (<a> * <chart presence in UK> + 
+#      <b> * <chart presence in US>) / 
+#     (<a> + <b>)
+# New variables: Chart.presence.UK, Chart.presence.US, Chart.presence.UK.and.US
+
+the.beatles.songs$Weeks.at.No1.in.UK.The.Guardian <-            # restore this as a numeric
+  original.Weeks.at.No1.in.UK.The.Guardian
+saveRDS(the.beatles.songs, "The Beatles songs dataset, v5.5.RData")
+
+source("Chart presence.R")
+ch.pos.UK.norm <- getNormalizedChartPosition(the.beatles.songs$Chart.position.UK.Wikipedia)
+weeks.on.chart.UK.norm <- 
+  getNormalizedWeeksOnChart(the.beatles.songs$Weeks.on.chart.in.UK.The.Guardian)
+weeks.at.No1.UK.norm <- 
+  getNormalizedWeeksAtNo1(the.beatles.songs$Weeks.at.No1.in.UK.The.Guardian)
+ch.pos.US.norm <-                                               # that's all for US in the dataset
+  getNormalizedChartPosition(the.beatles.songs$Chart.position.US.Wikipedia)
+the.beatles.songs$Chart.presence.UK <- 
+  getChartPresence(ch.pos.UK.norm, weeks.on.chart.UK.norm, weeks.at.No1.UK.norm, 
+                   1, 1, 1)                                     # experiment with different weights
+the.beatles.songs$Chart.presence.US <- 
+  getChartPresence(ch.pos.US.norm,                              # that's all for US in the dataset
+                   rep(0, nrow(the.beatles.songs)),             # dummy, for the sake of function format
+                   rep(0, nrow(the.beatles.songs)),             # dummy, for the sake of function format
+                   1, 0, 0)                                     # 0 weights for missing data
+the.beatles.songs$Chart.presence.UK.and.US <- 
+  getChartPresenceOverall(the.beatles.songs$Chart.presence.UK, 
+                          the.beatles.songs$Chart.presence.US, 
+                          1, 1)                                 # experiment with different weights
+
+# How relevant are the new variables for predicting Billboard Top 50 Beatles songs?
+# Discretize and factorize them first:
+# <dataset>$<new factor feature> <- 
+#   cut(<dataset>$<numeric feature>, 
+#       breaks = <n>,                   # number of intervals to cut the <numeric feature> into
+#       labels = c("<lab 1>", "<lab 2>", ..., "<lab n>"))       # factor labels
+the.beatles.songs$Hype.UK <- 
+  cut(the.beatles.songs$Chart.presence.UK, 
+      breaks = 5, 
+      labels = c("Very Low", "Low", "Neutral", "High", "Very High"))
+the.beatles.songs$Hype.US <- 
+  cut(the.beatles.songs$Chart.presence.US, 
+      breaks = 5, 
+      labels = c("Very Low", "Low", "Neutral", "High", "Very High"))
+the.beatles.songs$Hype.UK.and.US <- 
+  cut(the.beatles.songs$Chart.presence.UK.and.US, 
+      breaks = 5, 
+      labels = c("Very Low", "Low", "Neutral", "High", "Very High"))
+
+# And now plot them:
+ggplot(the.beatles.songs[1:249, ], 
+       aes(x = Hype.UK, fill = Top.50.Billboard)) +
+  geom_bar(position = "dodge") + 
+  theme_bw()
+ggplot(the.beatles.songs[1:249, ], 
+       aes(x = Hype.US, fill = Top.50.Billboard)) +
+  geom_bar(position = "dodge") + 
+  theme_bw()
+ggplot(the.beatles.songs[1:249, ], 
+       aes(x = Hype.UK.and.US, fill = Top.50.Billboard)) +
+  geom_bar(position = "dodge") + 
+  theme_bw()
+
+
+###################################
+# Resources, readings, references #
+###################################
+
+# Classification vs. regression: 
+# http://www.simafore.com/blog/bid/62482/2-main-differences-between-classification-and-regression-trees
+
